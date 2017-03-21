@@ -270,6 +270,7 @@ namespace Lucene.Net.Store.Azure
             return new AzureIndexOutput(this, blob);
         }
 
+        [DebuggerStepThrough]
         /// <summary>Returns a stream reading an existing file. </summary>
         public override IndexInput OpenInput(System.String name, IOContext context)
         {
