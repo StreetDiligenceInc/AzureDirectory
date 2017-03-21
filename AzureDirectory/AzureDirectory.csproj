@@ -61,6 +61,9 @@
       <HintPath>..\packages\SharpZipLib.0.86.0\lib\20\ICSharpCode.SharpZipLib.dll</HintPath>
       <SpecificVersion>False</SpecificVersion>
     </Reference>
+    <Reference Include="Lucene.Net, Version=4.8.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\Lucene.Net.4.8.0.770-beta\lib\net451\Lucene.Net.dll</HintPath>
+      <Private>True</Private>
     <Reference Include="Lucene.Net, Version=4.8.0.770-beta, Culture=neutral, PublicKeyToken=85089178b9ac3181, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\packages\Lucene.Net.4.8.0.770-beta\lib\net451\Lucene.Net.dll</HintPath>
