@@ -28,7 +28,7 @@ namespace AzureDirectoryTests
             var azureDirectory = new AzureDirectory(cloudStorageAccount, "testcatalog");
 
             var analyzer = new StandardAnalyzer(Lucene.Net.Util.LuceneVersion.LUCENE_30);
-            var config = new IndexWriterConfig(Lucene.Net.Util.LuceneVersion.LUCENE_30, analyzer).SetUseCompoundFile(false);
+            var config = new IndexWriterConfig(Lucene.Net.Util.LuceneVersion.LUCENE_30, analyzer);
 
             using (var indexWriter = new IndexWriter(azureDirectory, config))
             {

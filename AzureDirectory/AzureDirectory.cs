@@ -291,8 +291,8 @@ namespace Lucene.Net.Store.Azure
         {
             Debug.WriteLine(string.Format("Copy: {0} to {1}", src, dest));
 
-
-            base.Copy(_cacheDirectory, src, dest, context);
+            base.Copy(to, src, dest, context);
+            
         }
 
 
