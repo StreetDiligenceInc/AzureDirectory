@@ -22,7 +22,7 @@ namespace Lucene.Net.Store.Azure
 
         public Lucene.Net.Store.Directory CacheDirectory { get { return _azureDirectory.CacheDirectory; } }
 
-        public AzureIndexInput(AzureDirectory azuredirectory, ICloudBlob blob)
+        public AzureIndexInput(AzureDirectory azuredirectory, ICloudBlob blob) : base("Azure" + azuredirectory.ToString())
         {
             _name = blob.Uri.Segments[blob.Uri.Segments.Length - 1];
 
@@ -66,9 +66,9 @@ namespace Lucene.Net.Store.Azure
                     {
 
                         // cachedLastModifiedUTC was not ouputting with a date (just time) and the time was always off
-                        long unixDate = CacheDirectory.FileModified(fileName);
-                        DateTime start = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-                        var cachedLastModifiedUTC = start.AddMilliseconds(unixDate).ToUniversalTime();
+                        long unixDate = _azureDirectory.FileModified(fileName);
+                        // DateTime start = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                        var cachedLastModifiedUTC =  new DateTime(unixDate).ToUniversalTime();
                         
                         if (cachedLastModifiedUTC != blobLastModifiedUTC)
                         {
@@ -96,10 +96,19 @@ namespace Lucene.Net.Store.Azure
                     }
                     else
                     {
-                        using (var fileStream = _azureDirectory.CreateCachedOutputAsStream(fileName))
+                        using (var fileStream = _azureDirectory.CreateOutput(fileName, IOContext.DEFAULT))
                         {
                             // get the blob
-                            _blob.DownloadToStream(fileStream);
+                            _blob.FetchAttributes();
+                            long fileByteLength = _blob.Properties.Length;
+                            byte[] fileContent = new byte[fileByteLength];
+                            for (int i = 0; i < fileByteLength; i++)
+                            {
+                                fileContent[i] = 0x20;
+                            }
+                            _blob.DownloadToByteArray(fileContent, 0);
+
+                            fileStream.WriteBytes(fileContent, (int)fileByteLength);
 
                             fileStream.Flush();
                             Debug.WriteLine(string.Format("GET {0} RETREIVED {1} bytes", _name, fileStream.Length));
@@ -107,7 +116,7 @@ namespace Lucene.Net.Store.Azure
                     }
 
                     // and open it as an input 
-                    _indexInput = CacheDirectory.OpenInput(fileName);
+                    _indexInput = CacheDirectory.OpenInput(fileName, IOContext.DEFAULT);
                 }
                 else
                 {
@@ -116,7 +125,7 @@ namespace Lucene.Net.Store.Azure
 #endif
 
                     // open the file in read only mode
-                    _indexInput = CacheDirectory.OpenInput(fileName);
+                    _indexInput = CacheDirectory.OpenInput(fileName, IOContext.DEFAULT);
                 }
             }
             finally
@@ -140,7 +149,7 @@ namespace Lucene.Net.Store.Azure
                 deflatedStream.Seek(0, SeekOrigin.Begin);
 
                 // open output file for uncompressed contents
-                using (var fileStream = _azureDirectory.CreateCachedOutputAsStream(fileName))
+                using (var fileStream = _azureDirectory.CreateOutput(fileName, IOContext.DEFAULT))
                 using (var decompressor = new DeflateStream(deflatedStream, CompressionMode.Decompress))
                 {
                     var bytes = new byte[65535];
@@ -155,7 +164,7 @@ namespace Lucene.Net.Store.Azure
             }
         }
 
-        public AzureIndexInput(AzureIndexInput cloneInput)
+        public AzureIndexInput(AzureIndexInput cloneInput) : base("Azure" + cloneInput.ToString())
         {
             _fileMutex = BlobMutexManager.GrabMutex(cloneInput._name);
             _fileMutex.WaitOne();
@@ -205,7 +214,7 @@ namespace Lucene.Net.Store.Azure
             _indexInput.Seek(pos);
         }
 
-        protected override void Dispose(bool disposing)
+        protected void Dispose(bool disposing)
         {
             _fileMutex.WaitOne();
             try
@@ -252,5 +261,9 @@ namespace Lucene.Net.Store.Azure
             return clone;
         }
 
+        public override void Dispose()
+        {
+            this.Dispose(true);
+        }
     }
 }

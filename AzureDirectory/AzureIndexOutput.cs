@@ -1,4 +1,5 @@
-﻿using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Lucene.Net.Support;
+using Microsoft.WindowsAzure.Storage.Blob;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -11,7 +12,7 @@ namespace Lucene.Net.Store.Azure
     /// <summary>
     /// Implements IndexOutput semantics for a write/append only file
     /// </summary>
-    public class AzureIndexOutput : IndexOutput
+    public class AzureIndexOutput : IndexOutput, IDisposable
     {
         private AzureDirectory _azureDirectory;
         private CloudBlobContainer _blobContainer;
@@ -19,6 +20,9 @@ namespace Lucene.Net.Store.Azure
         private IndexOutput _indexOutput;
         private Mutex _fileMutex;
         private ICloudBlob _blob;
+        private IChecksum _digest;
+
+
         public Lucene.Net.Store.Directory CacheDirectory { get { return _azureDirectory.CacheDirectory; } }
 
         public AzureIndexOutput(AzureDirectory azureDirectory, ICloudBlob blob)
@@ -33,12 +37,14 @@ namespace Lucene.Net.Store.Azure
                 _name = blob.Uri.Segments[blob.Uri.Segments.Length - 1];
 
                 // create the local cache one we will operate against...
-                _indexOutput = CacheDirectory.CreateOutput(_name);
+                _indexOutput = CacheDirectory.CreateOutput(_name, IOContext.DEFAULT);
             }
             finally
             {
                 _fileMutex.ReleaseMutex();
             }
+
+            _digest = new CRC32();
         }
 
         public override void Flush()
@@ -46,7 +52,7 @@ namespace Lucene.Net.Store.Azure
             _indexOutput.Flush();
         }
 
-        protected override void Dispose(bool disposing)
+        protected void Dispose(bool disposing)
         {
             _fileMutex.WaitOne();
             try
@@ -68,7 +74,7 @@ namespace Lucene.Net.Store.Azure
                 }
                 else
                 {
-                    blobStream = new StreamInput(CacheDirectory.OpenInput(fileName));
+                    blobStream = new StreamInput(CacheDirectory.OpenInput(fileName, IOContext.DEFAULT));
                 }
 
                 try
@@ -78,7 +84,7 @@ namespace Lucene.Net.Store.Azure
 
                     // set the metadata with the original index file properties
                     _blob.Metadata["CachedLength"] = originalLength.ToString();
-                    _blob.Metadata["CachedLastModified"] = CacheDirectory.FileModified(fileName).ToString();
+                    _blob.Metadata["CachedLastModified"] = _azureDirectory.FileModified(fileName).ToString();
                     _blob.SetMetadata();
 
                     Debug.WriteLine(string.Format("PUT {1} bytes to {0} in cloud", _name, blobStream.Length));
@@ -111,7 +117,7 @@ namespace Lucene.Net.Store.Azure
 
             try
             {
-                using (var indexInput = CacheDirectory.OpenInput(fileName))
+                using (var indexInput = CacheDirectory.OpenInput(fileName, IOContext.DEFAULT))
                 using (var compressor = new DeflateStream(compressedStream, CompressionMode.Compress, true))
                 {
                     // compress to compressedOutputStream
@@ -148,16 +154,13 @@ namespace Lucene.Net.Store.Azure
 
         public override void WriteByte(byte b)
         {
+            _digest.Update(b);
             _indexOutput.WriteByte(b);
-        }
-
-        public override void WriteBytes(byte[] b, int length)
-        {
-            _indexOutput.WriteBytes(b, length);
         }
 
         public override void WriteBytes(byte[] b, int offset, int length)
         {
+            _digest.Update(b, offset, length);
             _indexOutput.WriteBytes(b, offset, length);
         }
 
@@ -169,9 +172,22 @@ namespace Lucene.Net.Store.Azure
             }
         }
 
+        public override long Checksum
+        {
+            get
+            {
+                return _digest.Value;
+            }
+        }
+
         public override void Seek(long pos)
         {
             _indexOutput.Seek(pos);
+        }
+
+        public override void Dispose()
+        {
+            this.Dispose(true);
         }
     }
 }
