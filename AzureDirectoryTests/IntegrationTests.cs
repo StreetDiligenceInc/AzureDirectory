@@ -1,4 +1,5 @@
-﻿using Lucene.Net.Analysis.Standard;
+﻿#define DEBUG
+using Lucene.Net.Analysis.Standard;
 using Lucene.Net.Documents;
 using Lucene.Net.Index;
 using Lucene.Net.Search;
@@ -19,14 +20,19 @@ namespace AzureDirectoryTests
 
             var connectionString = Environment.GetEnvironmentVariable("DataConnectionString") ?? "UseDevelopmentStorage=true";
 
-            var cloudStorageAccount = CloudStorageAccount.Parse(connectionString);
+            connectionString = "";
+
+            var cloudStorageAccount = CloudStorageAccount.Parse("DefaultEndpointsProtocol=https;AccountName=sddocumentsdev;AccountKey=RvyBnaoZmrkbc7i5CZADEyTLWTsOlrmiavnGVgm7fYS4rEk/dp3JVp+mpPtcIgHBo7voGZZYjcxEnyW7G0/NrQ==");
 
             // default AzureDirectory stores cache in local temp folder
             var azureDirectory = new AzureDirectory(cloudStorageAccount, "testcatalog");
 
-            using (var indexWriter = new IndexWriter(azureDirectory, new StandardAnalyzer(Lucene.Net.Util.Version.LUCENE_30), !IndexReader.IndexExists(azureDirectory), new Lucene.Net.Index.IndexWriter.MaxFieldLength(IndexWriter.DEFAULT_MAX_FIELD_LENGTH)))
+            var analyzer = new StandardAnalyzer(Lucene.Net.Util.LuceneVersion.LUCENE_30);
+            var config = new IndexWriterConfig(Lucene.Net.Util.LuceneVersion.LUCENE_30, analyzer).SetUseCompoundFile(false);
+
+            using (var indexWriter = new IndexWriter(azureDirectory, config))
             {
-                indexWriter.SetRAMBufferSizeMB(10.0);
+                //indexWriter.SetRAMBufferSizeMB(10.0);
 
                 for (int iDoc = 0; iDoc < 10000; iDoc++)
                 {
@@ -42,8 +48,9 @@ namespace AzureDirectoryTests
 
             for (var i = 0; i < 100; i++)
             {
-                using (var searcher = new IndexSearcher(azureDirectory))
+                using (IndexReader indexReader = DirectoryReader.Open(azureDirectory))
                 {
+                    var searcher = new IndexSearcher(indexReader);
                     Assert.AreNotEqual(0, SearchForPhrase(searcher, "dog"));
                     Assert.AreNotEqual(0, SearchForPhrase(searcher, "cat"));
                     Assert.AreNotEqual(0, SearchForPhrase(searcher, "car"));
@@ -61,7 +68,8 @@ namespace AzureDirectoryTests
 
         static int SearchForPhrase(IndexSearcher searcher, string phrase)
         {
-            var parser = new Lucene.Net.QueryParsers.QueryParser(Lucene.Net.Util.Version.LUCENE_30, "Body", new StandardAnalyzer(Lucene.Net.Util.Version.LUCENE_30));
+            
+            var parser = new Lucene.Net.QueryParsers.Classic.QueryParser(Lucene.Net.Util.LuceneVersion.LUCENE_30, "Body", new StandardAnalyzer(Lucene.Net.Util.LuceneVersion.LUCENE_30));
             var query = parser.Parse(phrase);
             return searcher.Search(query, 100).TotalHits;
         }

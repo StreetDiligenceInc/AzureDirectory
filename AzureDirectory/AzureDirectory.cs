@@ -2,9 +2,12 @@
 using Microsoft.WindowsAzure.Storage.Blob;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
 using System.Linq;
+using Path = System.IO.Path;
+using DirectoryInfo = System.IO.DirectoryInfo;
+using Lucene.Net.Store;
+using System.Net;
+using System.Diagnostics;
 
 namespace Lucene.Net.Store.Azure
 {
@@ -16,7 +19,7 @@ namespace Lucene.Net.Store.Azure
         private CloudBlobContainer _blobContainer;
         private Directory _cacheDirectory;
 
-
+        private AzureLockFactory _lockFactory;
 
 
         /// <summary>
@@ -53,6 +56,9 @@ namespace Lucene.Net.Store.Azure
 
             _blobClient = storageAccount.CreateCloudBlobClient();
             _initCacheDirectory(cacheDirectory);
+
+            _lockFactory = new AzureLockFactory(this, _cacheDirectory, _rootFolder);
+
             this.CompressBlobs = compressBlobs;
         }
 
@@ -90,6 +96,19 @@ namespace Lucene.Net.Store.Azure
             }
         }
 
+        public override LockFactory LockFactory
+        {
+            get
+            {
+                return _lockFactory;
+            }
+
+            set
+            {
+                throw new NotImplementedException();
+            }
+        }
+
         private void _initCacheDirectory(Directory cacheDirectory)
         {
             if (cacheDirectory != null)
@@ -109,7 +128,7 @@ namespace Lucene.Net.Store.Azure
                 if (!catalogDir.Exists)
                     catalogDir.Create();
 
-                _cacheDirectory = FSDirectory.Open(catalogPath);
+                _cacheDirectory = FSDirectory.Open(new DirectoryInfo(catalogPath));
             }
 
             CreateContainer();
@@ -132,6 +151,7 @@ namespace Lucene.Net.Store.Azure
         /// <summary>Returns true if a file with the given name exists. </summary>
         public override bool FileExists(String name)
         {
+            Debug.WriteLine(string.Format("File Exists: {0}", name));
             // this always comes from the server
             try
             {
@@ -144,8 +164,9 @@ namespace Lucene.Net.Store.Azure
         }
 
         /// <summary>Returns the time the named file was last modified. </summary>
-        public override long FileModified(String name)
+        public long FileModified(String name)
         {
+            Debug.WriteLine(string.Format("FileModified: {0}", name));
             // this always has to come from the server
             try
             {
@@ -160,19 +181,25 @@ namespace Lucene.Net.Store.Azure
         }
 
         /// <summary>Set the modified time of an existing file to now. </summary>
-        public override void TouchFile(System.String name)
+        public void TouchFile(System.String name)
         {
+            Debug.WriteLine(string.Format("TouchFile: {0}", name));
+
             //BlobProperties props = _blobContainer.GetBlobProperties(_rootFolder + name);
             //_blobContainer.UpdateBlobMetadata(props);
             // I have no idea what the semantics of this should be...hmmmm...
             // we never seem to get called
-            _cacheDirectory.TouchFile(name);
+            //_cacheDirectory.TouchFile(name);
             //SetCachedBlobProperties(props);
+
+            //throw new NotImplementedException();
         }
 
         /// <summary>Removes an existing file in the directory. </summary>
         public override void DeleteFile(System.String name)
         {
+            Debug.WriteLine(string.Format("DeleteFile: {0}", name));
+
             // We're going to try to remove this from the cache directory first,
             // because the IndexFileDeleter will call this file to remove files 
             // but since some files will be in use still, it will retry when a reader/searcher
@@ -193,7 +220,7 @@ namespace Lucene.Net.Store.Azure
                     _cacheDirectory.DeleteFile(name);
                 }
             }
-            catch (IOException ex)
+            catch (System.IO.IOException ex)
             {
                 // This will occur because this file is locked, when this is the case, we don't really want to delete it from the master either because
                 // if we do that then this file will never get removed from the cache folder either! This is based on the Deletion Policy which the
@@ -206,12 +233,17 @@ namespace Lucene.Net.Store.Azure
 
             var blob = _blobContainer.GetBlockBlobReference(_rootFolder + name);
             blob.DeleteIfExists();
+
         }
 
 
         /// <summary>Returns the length of a file in the directory. </summary>
         public override long FileLength(String name)
         {
+            Debug.WriteLine(string.Format("FileLength: {0}", name));
+
+            return _cacheDirectory.FileLength(name);
+            /*
             var blob = _blobContainer.GetBlockBlobReference(_rootFolder + name);
             blob.FetchAttributes();
 
@@ -225,20 +257,23 @@ namespace Lucene.Net.Store.Azure
                 return blobLength;
             }
             return blob.Properties.Length; // fall back to actual blob size
+        */
         }
 
         /// <summary>Creates a new, empty file in the directory with the given name.
         /// Returns a stream writing this file. 
         /// </summary>
-        public override IndexOutput CreateOutput(System.String name)
+        public override IndexOutput CreateOutput(System.String name, IOContext context)
         {
+            Debug.WriteLine(string.Format("CreateOutput: {0}", name));
             var blob = _blobContainer.GetBlockBlobReference(_rootFolder + name);
             return new AzureIndexOutput(this, blob);
         }
 
         /// <summary>Returns a stream reading an existing file. </summary>
-        public override IndexInput OpenInput(System.String name)
+        public override IndexInput OpenInput(System.String name, IOContext context)
         {
+            Debug.WriteLine(string.Format("OpenInput: {0}", name));
             try
             {
                 var blob = _blobContainer.GetBlockBlobReference(_rootFolder + name);
@@ -247,41 +282,34 @@ namespace Lucene.Net.Store.Azure
             }
             catch (Exception err)
             {
-                throw new FileNotFoundException(name, err);
+                throw new System.IO.FileNotFoundException(name, err);
             }
         }
 
-        private Dictionary<string, AzureLock> _locks = new Dictionary<string, AzureLock>();
+        public override void Copy(Directory to, string src, string dest, IOContext context)
+        {
+            Debug.WriteLine(string.Format("Copy: {0} to {1}", src, dest));
+
+
+            base.Copy(_cacheDirectory, src, dest, context);
+        }
+
 
         /// <summary>Construct a {@link Lock}.</summary>
         /// <param name="name">the name of the lock file
         /// </param>
         public override Lock MakeLock(System.String name)
         {
-            lock (_locks)
-            {
-                if (!_locks.ContainsKey(name))
-                {
-                    _locks.Add(name, new AzureLock(_rootFolder + name, this));
-                }
-                return _locks[name];
-            }
+            return _lockFactory.MakeLock(name);
         }
 
         public override void ClearLock(string name)
         {
-            lock (_locks)
-            {
-                if (_locks.ContainsKey(name))
-                {
-                    _locks[name].BreakLock();
-                }
-            }
-            _cacheDirectory.ClearLock(name);
+            _lockFactory.ClearLock(name);
         }
 
         /// <summary>Closes the store. </summary>
-        protected override void Dispose(bool disposing)
+        protected void Dispose(bool disposing)
         {
             _blobContainer = null;
             _blobClient = null;
@@ -311,16 +339,34 @@ namespace Lucene.Net.Store.Azure
                     return false;
             };
         }
-        public StreamInput OpenCachedInputAsStream(string name)
+
+        
+
+
+        public override void Sync(ICollection<string> names)
         {
-            return new StreamInput(CacheDirectory.OpenInput(name));
+            //_cacheDirectory.Sync(names);
+            /*
+            foreach (var name in _cacheDirectory.ListAll())
+            {
+                var blob = _blobContainer.GetBlockBlobReference(_rootFolder + name);
+                try
+                {
+                    var output = CreateOutput(name, IOContext.DEFAULT);
+                    output.Dispose();
+                }
+                catch (Exception ex)
+                {
+
+                }
+            }
+            */
+            //throw new NotImplementedException();
         }
 
-        public StreamOutput CreateCachedOutputAsStream(string name)
+        public override void Dispose()
         {
-            return new StreamOutput(CacheDirectory.CreateOutput(name));
         }
-
     }
 
 }

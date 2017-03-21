@@ -23,7 +23,7 @@ namespace Lucene.Net.Store.Azure
         }
 
         #region Lock methods
-        override public bool IsLocked()
+        private bool IsLocked()
         {
             var blob = _azureDirectory.BlobContainer.GetBlockBlobReference(_lockFile);
             try
@@ -85,6 +85,14 @@ namespace Lucene.Net.Store.Azure
         }
 
         private Timer _renewTimer;
+
+        public override bool Locked
+        {
+            get
+            {
+                return IsLocked();
+            }
+        }
 
         public void Renew()
         {
