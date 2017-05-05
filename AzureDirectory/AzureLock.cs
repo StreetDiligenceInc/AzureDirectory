@@ -59,20 +59,9 @@ namespace Lucene.Net.Store.Azure
                 Debug.Print("AzureLock:Obtain({0}) : {1}", _lockFile, _leaseid);
                 if (String.IsNullOrEmpty(_leaseid))
                 {
-                    _leaseid = blob.AcquireLease(TimeSpan.FromSeconds(60), _leaseid);
+                    //infinite lease
+                    _leaseid = blob.AcquireLease(null, _leaseid);
                     Debug.Print("AzureLock:Obtain({0}): AcquireLease : {1}", _lockFile, _leaseid);
-                    
-                    // keep the lease alive by renewing every 30 seconds
-                    long interval = (long)TimeSpan.FromSeconds(30).TotalMilliseconds;
-                    _renewTimer = new Timer((obj) => 
-                        {
-                            try
-                            {
-                                AzureLock al = (AzureLock)obj;
-                                al.Renew();
-                            }
-                            catch (Exception err) { Debug.Print(err.ToString()); } 
-                        }, this, interval, interval);
                 }
                 return !String.IsNullOrEmpty(_leaseid);
             }
@@ -83,8 +72,6 @@ namespace Lucene.Net.Store.Azure
             }
             return false;
         }
-
-        private Timer _renewTimer;
 
         public override bool Locked
         {
@@ -111,11 +98,6 @@ namespace Lucene.Net.Store.Azure
             {
                 var blob = _azureDirectory.BlobContainer.GetBlockBlobReference(_lockFile);
                 blob.ReleaseLease(new AccessCondition { LeaseId = _leaseid });
-                if (_renewTimer != null)
-                {
-                    _renewTimer.Dispose();
-                    _renewTimer = null;
-                }
                 _leaseid = null;
             }
         }
